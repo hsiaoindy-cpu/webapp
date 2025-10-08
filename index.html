@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>超慢跑機WEB APP模擬</title>
+  <style>
+    body { 
+      font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; 
+      padding: 20px; 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      min-height: 100vh;
+      margin: 0;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: rgba(255,255,255,0.1);
+      padding: 30px;
+      border-radius: 15px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    
+    h1, h2 {
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2em;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    h2 {
+      font-size: 1.5em;
+      margin-top: 30px;
+    }
+    
+    button { 
+      padding: 12px 20px; 
+      font-size: 16px; 
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      width: 100%;
+      margin-bottom: 15px;
+    }
+    
+    #connectBtn {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    #connectBtn:hover {
+      background: #45a049;
+      transform: translateY(-2px);
+    }
+    
+    #connectBtn:disabled {
+      background: #666;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    #handshakeBtn, #stopBtn, #speedBtn {
+      background: #2196F3;
+      color: white;
+    }
+    
+    #handshakeBtn:hover, #stopBtn:hover, #speedBtn:hover {
+      background: #1976D2;
+    }
+    
+    #downloadBtn {
+      background: #FF9800;
+      color: white;
+    }
+    
+    #downloadBtn:hover {
+      background: #F57C00;
+      transform: translateY(-2px);
+    }
+    
+    #downloadBtn:disabled {
+      background: #666;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .data-display {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    
+    .data-card {
+      background: rgba(255,255,255,0.2);
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+    }
+    
+    .data-value {
+      font-size: 2.5em;
+      font-weight: bold;
+      margin: 10px 0;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .data-label {
+      font-size: 1.1em;
+      opacity: 0.9;
+    }
+    
+    .data-unit {
+      font-size: 0.8em;
+      opacity: 0.7;
+    }
+    
+    .recording-status {
+      background: rgba(255, 152, 0, 0.3);
+      border: 2px solid #FF9800;
+      padding: 10px;
+      border-radius: 8px;
+      text-align: center;
+      margin: 15px 0;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 0.7; }
+      50% { opacity: 1; }
+      100% { opacity: 0.7; }
+    }
+    
+    pre { 
+      background: rgba(0,0,0,0.7); 
+      color: #00ff00; 
+      padding: 15px; 
+      border-radius: 8px; 
+      white-space: pre-wrap; 
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 14px;
+      margin-top: 20px;
+      display: none;
+    }
+    
+    .status {
+      text-align: center;
+      margin: 15px 0;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    
+    .status.connected {
+      background: rgba(76, 175, 80, 0.3);
+    }
+    
+    .status.disconnected {
+      background: rgba(244, 67, 54, 0.3);
+    }
+    
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    
+    .download-section {
+      margin-top: 20px;
+      padding: 15px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+    }
+    
+    .music-control {
+      background: rgba(255,255,255,0.1);
+      padding: 20px;
+      border-radius: 10px;
+      margin-top: 20px;
+    }
+    
+    .music-control .row { 
+      display: flex;
+      align-items: center;
+      margin: 10px 0;
+      gap: 10px;
+    }
+    
+    .music-control input[type=range] { 
+      flex: 1;
+    }
+    
+    .music-control button {
+      margin-bottom: 0;
+    }
+    
+    .angle-speed-indicator {
+      background: rgba(76, 175, 80, 0.3);
+      border: 2px solid #4CAF50;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      margin: 15px 0;
+      font-size: 1.1em;
+    }
+    
+    footer { 
+      text-align: center;
+      font-size: 0.9em;
+      opacity: 0.7;
+      margin-top: 15px;
+    }
+    
+    @media (max-width: 600px) {
+      .data-display {
+        grid-template-columns: 1fr;
+      }
+      .controls {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WEB APP連線測試</h1>
+    
+    <button id="connectBtn">🔗 連接超慢跑機</button>
+    
+    <div class="status disconnected" id="status">
+      ⭕ 未連接
+    </div>
+    
+    <div class="controls">
+      <button id="handshakeBtn" disabled>🤝 開始傳輸</button>
+      <button id="stopBtn" disabled>⏹️ 停止傳輸</button>
+      <button id="speedBtn" disabled>🏃 切換速度</button>
+    </div>
+    
+    <div id="recordingStatus" style="display: none;" class="recording-status">
+      🔴 記錄中... 已記錄 <span id="recordCount">0</span> 筆資料
+    </div>
+    
+    <div class="data-display">
+      <div class="data-card">
+        <div class="data-label">心率</div>
+        <div class="data-value" id="heartRate">--</div>
+        <div class="data-unit">BPM</div>
+      </div>
+      <div class="data-card">
+        <div class="data-label">踏板角度</div>
+        <div class="data-value" id="tiltAngle">--</div>
+        <div class="data-unit">度</div>
+      </div>
+    </div>
+    
+    <div class="data-display">
+      <div class="data-card">
+        <div class="data-label">封包序號</div>
+        <div class="data-value" id="packetSeq">--</div>
+        <div class="data-unit">No.</div>
+      </div>
+      <div class="data-card">
+        <div class="data-label">接收次數</div>
+        <div class="data-value" id="packetCount">0</div>
+        <div class="data-unit">次</div>
+      </div>
+    </div>
+    
+    <div class="download-section">
+      <button id="downloadBtn" disabled>💾 下載 JSON 記錄</button>
+      <div style="margin-top: 10px; font-size: 0.9em; opacity: 0.8;">
+        將下載包含開始/停止時間及原始資料的 JSON 檔案
+      </div>
+    </div>
+    
+    <!-- Music Section -->
+    <section id="music-section" class="music-control">
+      <h2>音樂播放控制</h2>
+      
+      <div id="angleSpeedIndicator" class="angle-speed-indicator" style="display: none;">
+        🎵 自動播放速率：<span id="autoSpeedValue">1.00</span>x
+        <br>
+        <small>由踏板角度 <span id="angleForSpeed">0.0</span>° 控制</small>
+      </div>
+      
+      <div class="row">
+        <button id="btnPlay">▶️ Start</button>
+        <button id="btnStop" disabled>⏹️ Stop</button>
+        <span>狀態：<span id="audioStatus">尚未載入音檔</span></span>
+      </div>
+
+      <div class="row">
+        <label>基礎倍率 <span id="rateVal">1.00</span>x</label>
+        <input id="rate" type="range" min="0.25" max="2.0" step="0.01" value="1.00">
+      </div>
+
+      <div class="row">
+        <label>音量 <span id="gainVal">0.80</span></label>
+        <input id="gain" type="range" min="0" max="1" step="0.01" value="0.8">
+      </div>
+
+      <div class="row">
+        <label><input id="loop" type="checkbox" checked> 循環播放</label>
+        <input id="file" type="file" accept="audio/*">
+      </div>
+
+      <div class="row">
+        <label><input id="enableAngleControl" type="checkbox" checked> 啟用角度控制速度</label>
+      </div>
+
+      <p style="font-size:0.9em;opacity:0.8;">
+        BLE 傳入踏板角度會自動改變播放速率（角度越大 → 播放越快）
+        <br>
+        角度範圍：-20° 到 +20°，對應速率：0.5x 到 2.0x
+      </p>
+    </section>
+
+    <pre id="log"></pre>
+    <footer>本系統示範 BLE 感測資料與 WebAudio 音樂互動</footer>
+  </div>
+
+  <script>
+    // 全域變數
+    let device = null;
+    let server = null;
+    let service = null;
+    let characteristic = null;
+    let isTransmitting = false;
+    let packetCount = 0;
+    let currentSpeedMode = 'SLOW';
+    
+    // 記錄相關變數
+    let currentSession = null;
+    let isRecording = false;
+    
+    // AMB82 BLE 服務 UUID
+    const SERVICE_UUID = '12345678-1234-5678-9abc-123456789abc';
+    const CHARACTERISTIC_UUID = '87654321-4321-8765-cba9-987654321cba';
+    
+    // WebAudio 變數
+    let ctx, gainNode, source, buffer;
+    let baseRate = 1.0, loop = true;
+    let playing = false;
+    let enableAngleControl = true;
+    let currentTiltAngle = 0;
+    
+    const $ = sel => document.querySelector(sel);
+    const setAudioStatus = t => $("#audioStatus").textContent = t;
+    
+    // 將踏板角度轉換為播放速率
+    // 角度範圍：-20° 到 +20°
+    // 速率範圍：0.5x 到 2.0x
+    const angleToPlaybackRate = (angle) => {
+      // 限制角度範圍
+      const clampedAngle = Math.max(-20, Math.min(20, angle));
+      
+      // 線性映射：-20° -> 0.5x, 0° -> 1.0x, +20° -> 2.0x
+      const rate = 1.0 + (clampedAngle / 20) * 1.0;
+      
+      return Math.max(0.5, Math.min(2.0, rate));
+    };
+    
+    // 更新音樂播放速率
+    const updatePlaybackRateFromAngle = (angle) => {
+      if (!enableAngleControl || !source || !playing) return;
+      
+      currentTiltAngle = angle;
+      const newRate = angleToPlaybackRate(angle);
+      
+      // 平滑過渡到新速率
+      source.playbackRate.setTargetAtTime(newRate, ctx.currentTime, 0.1);
+      
+      // 更新顯示
+      $("#autoSpeedValue").textContent = newRate.toFixed(2);
+      $("#angleForSpeed").textContent = angle.toFixed(1);
+      $("#angleSpeedIndicator").style.display = "block";
+      
+      log(`🎵 角度 ${angle.toFixed(1)}° → 播放速率 ${newRate.toFixed(2)}x`);
+    };
+    
+    // 日誌函數
+    const log = (...args) => {
+      const timestamp = new Date().toLocaleTimeString();
+      document.getElementById('log').textContent += `[${timestamp}] ${args.join(' ')}\n`;
+      document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+      console.log(...args);
+    };
+    
+    // 更新狀態顯示
+    const updateStatus = (text, connected = false) => {
+      const statusElement = document.getElementById('status');
+      statusElement.textContent = text;
+      statusElement.className = connected ? 'status connected' : 'status disconnected';
+    };
+    
+    // 啟用/停用控制按鈕
+    const updateButtons = (connected) => {
+      document.getElementById('handshakeBtn').disabled = !connected;
+      document.getElementById('stopBtn').disabled = !connected || !isTransmitting;
+      document.getElementById('speedBtn').disabled = !connected;
+      document.getElementById('connectBtn').disabled = connected;
+      document.getElementById('downloadBtn').disabled = !currentSession || isRecording;
+    };
+    
+    // 開始新的記錄會話
+    const startRecordingSession = () => {
+      currentSession = {
+        startTime: new Date().toISOString(),
+        stopTime: null,
+        deviceInfo: {
+          deviceName: device?.name || 'Unknown Device',
+          deviceId: device?.id || 'Unknown ID'
+        },
+        rawData: []
+      };
+      isRecording = true;
+      
+      document.getElementById('recordingStatus').style.display = 'block';
+      document.getElementById('recordCount').textContent = '0';
+      
+      log('📝 開始記錄會話:', currentSession.startTime);
+    };
+    
+    // 停止記錄會話
+    const stopRecordingSession = () => {
+      if (currentSession && isRecording) {
+        currentSession.stopTime = new Date().toISOString();
+        isRecording = false;
+        
+        document.getElementById('recordingStatus').style.display = 'none';
+        
+        log('🏁 記錄會話結束:', currentSession.stopTime);
+        log(`📊 本次記錄共 ${currentSession.rawData.length} 筆資料`);
+        
+        updateButtons(true);
+      }
+    };
+    
+    // 添加資料到當前記錄會話
+    const addDataToSession = (rawPacket) => {
+      if (currentSession && isRecording) {
+        currentSession.rawData.push({
+          timestamp: new Date().toISOString(),
+          rawPacket: rawPacket
+        });
+        
+        document.getElementById('recordCount').textContent = currentSession.rawData.length.toString();
+      }
+    };
+    
+    // 下載 JSON 檔案
+    const downloadJSON = () => {
+      if (!currentSession) {
+        log('❌ 沒有可下載的記錄');
+        return;
+      }
+      
+      const startTime = new Date(currentSession.startTime);
+      const fileName = `jogger_data_${startTime.getFullYear()}${(startTime.getMonth()+1).toString().padStart(2,'0')}${startTime.getDate().toString().padStart(2,'0')}_${startTime.getHours().toString().padStart(2,'0')}${startTime.getMinutes().toString().padStart(2,'0')}${startTime.getSeconds().toString().padStart(2,'0')}.json`;
+      
+      const jsonData = JSON.stringify(currentSession, null, 2);
+      
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      log('💾 JSON 檔案已下載:', fileName);
+      log(`📁 檔案包含 ${currentSession.rawData.length} 筆記錄`);
+    };
+    
+    // 解析資料封包
+    const parseDataPacket = (data) => {
+      try {
+        const text = new TextDecoder().decode(data);
+        log('收到原始資料:', text);
+        
+        const match = text.match(/<(\d)(\d{3})([+-]\d{3})>/);
+        if (match) {
+          const sequence = parseInt(match[1]);
+          const heartRate = parseInt(match[2]);
+          const tiltAngle = parseInt(match[3]) / 10.0;
+          const rawPacket = match[0];
+          
+          document.getElementById('packetSeq').textContent = sequence;
+          document.getElementById('heartRate').textContent = heartRate;
+          document.getElementById('tiltAngle').textContent = tiltAngle.toFixed(1);
+          document.getElementById('packetCount').textContent = ++packetCount;
+          
+          addDataToSession(rawPacket);
+          
+          // 根據角度更新音樂播放速率
+          updatePlaybackRateFromAngle(tiltAngle);
+          
+          log(`✅ 解析成功 - 序號:${sequence}, 心率:${heartRate}, 踏板角度:${tiltAngle}°`);
+          return true;
+        } else {
+          log('⚠️ 非標準封包格式:', text);
+          return false;
+        }
+      } catch (error) {
+        log('❌ 解析錯誤:', error.message);
+        return false;
+      }
+    };
+    
+    // 發送命令到 AMB82
+    const sendCommand = async (command) => {
+      if (!characteristic) {
+        log('❌ 特徵值未初始化');
+        return false;
+      }
+      
+      try {
+        log('📤 發送命令:', command);
+        const encoder = new TextEncoder();
+        const data = encoder.encode(command);
+        await characteristic.writeValue(data);
+        return true;
+      } catch (error) {
+        log('❌ 發送命令失敗:', error.message);
+        return false;
+      }
+    };
+    
+    // 連接設備
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      try {
+        if (!navigator.bluetooth) {
+          log('❌ 此瀏覽器不支援 Web Bluetooth API');
+          return;
+        }
+        
+        log('🔍 搜尋超慢跑機...');
+        updateStatus('🔍 搜尋設備中...');
+        
+        device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { name: 'AMB82-YL-Device' },
+            { namePrefix: 'AMB82' }
+          ],
+          optionalServices: [SERVICE_UUID]
+        });
+        
+        log('✅ 已選擇設備:', device.name || '(無名稱)');
+        
+        updateStatus('🔗 連接中...');
+        server = await device.gatt.connect();
+        log('🔗 已連接 GATT 伺服器');
+        
+        service = await server.getPrimaryService(SERVICE_UUID);
+        log('🔧 已獲取服務');
+        
+        characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+        log('📡 已獲取特徵值');
+        
+        await characteristic.startNotifications();
+        log('🔔 已啟用通知');
+        
+        characteristic.addEventListener('characteristicvaluechanged', (event) => {
+          parseDataPacket(event.target.value);
+        });
+        
+        device.addEventListener('gattserverdisconnected', () => {
+          log('🔌 設備已斷線');
+          updateStatus('⭕ 設備斷線');
+          updateButtons(false);
+          isTransmitting = false;
+          
+          if (isRecording) {
+            stopRecordingSession();
+          }
+        });
+        
+        updateStatus('✅ 已連接', true);
+        updateButtons(true);
+        log('🎉 連接成功！可以開始傳輸了');
+        
+      } catch (error) {
+        log('❌ 連接失敗:', error.message);
+        updateStatus('❌ 連接失敗');
+        updateButtons(false);
+      }
+    });
+    
+    // 傳輸開始
+    document.getElementById('handshakeBtn').addEventListener('click', async () => {
+      if (await sendCommand('<HELLOYL>\n\r')) {
+        log('🤝 發送傳輸命令，等待回應...');
+        isTransmitting = true;
+        
+        startRecordingSession();
+        
+        updateButtons(true);
+        updateStatus('📡 資料傳輸中', true);
+      }
+    });
+    
+    // 停止傳輸
+    document.getElementById('stopBtn').addEventListener('click', async () => {
+      if (await sendCommand('<BYEYL>\n\r')) {
+        log('⏹️ 發送停止命令');
+        isTransmitting = false;
+        
+        stopRecordingSession();
+        
+        updateButtons(true);
+        updateStatus('⏸️ 傳輸已停止', true);
+      }
+    });
+    
+    // 切換速度模式
+    document.getElementById('speedBtn').addEventListener('click', async () => {
+      const nextMode = currentSpeedMode === 'SLOW' ? 'FAST' : 'SLOW';
+      if (await sendCommand(nextMode)) {
+        currentSpeedMode = nextMode;
+        document.getElementById('speedBtn').textContent = 
+          `🏃 模式: ${currentSpeedMode}`;
+        log(`🚀 切換到 ${currentSpeedMode} 模式`);
+      }
+    });
+    
+    // 下載按鈕事件
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      downloadJSON();
+    });
+    
+    /* === WebAudio 音樂播放 === */
+    async function ensureCtx() {
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = ctx.createGain();
+        gainNode.gain.value = 0.8;
+        gainNode.connect(ctx.destination);
+      }
+      if (ctx.state === "suspended") await ctx.resume();
+    }
+
+    async function decodeFile(file) {
+      await ensureCtx();
+      const arr = await file.arrayBuffer();
+      buffer = await ctx.decodeAudioData(arr);
+      setAudioStatus(`已載入 ${file.name} (${buffer.duration.toFixed(1)}s)`);
+    }
+
+    function startPlay() {
+      if (!buffer) return setAudioStatus("尚未載入音檔");
+      stopPlay();
+      source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = loop;
+      
+      // 使用基礎速率或當前角度速率
+      const initialRate = enableAngleControl ? angleToPlaybackRate(currentTiltAngle) : baseRate;
+      source.playbackRate.value = initialRate;
+      
+      source.connect(gainNode);
+      source.start();
+      playing = true;
+      $("#btnPlay").disabled = true;
+      $("#btnStop").disabled = false;
+      setAudioStatus("播放中…");
+      
+      if (enableAngleControl) {
+        $("#angleSpeedIndicator").style.display = "block";
+        log('🎵 音樂播放已啟動，將根據踏板角度自動調整速率');
+      }
+    }
+
+    function stopPlay() {
+      if (source) { 
+        try { source.stop(); } catch(e){} 
+        source.disconnect(); 
+        source = null; 
+      }
+      playing = false;
+      $("#btnPlay").disabled = false;
+      $("#btnStop").disabled = true;
+      $("#angleSpeedIndicator").style.display = "none";
+      setAudioStatus("停止播放");
+    }
+
+    $("#btnPlay").addEventListener("click", startPlay);
+    $("#btnStop").addEventListener("click", stopPlay);
+    
+    $("#file").addEventListener("change", async e => {
+      const f = e.target.files[0]; 
+      if (f) { 
+        await decodeFile(f); 
+        startPlay(); 
+      }
+    });
+    
+    $("#rate").addEventListener("input", e => {
+      baseRate = parseFloat(e.target.value);
+      $("#rateVal").textContent = baseRate.toFixed(2);
+      
+      // 如果沒有啟用角度控制，直接更新播放速率
+      if (source && !enableAngleControl) {
+        source.playbackRate.setTargetAtTime(baseRate, ctx.currentTime, 0.05);
+      }
+    });
+    
+    $("#gain").addEventListener("input", e => {
+      const g = parseFloat(e.target.value);
+      $("#gainVal").textContent = g.toFixed(2);
+      if (gainNode) gainNode.gain.setTargetAtTime(g, ctx.currentTime, 0.05);
+    });
+    
+    $("#loop").addEventListener("change", e => loop = e.target.checked);
+    
+    $("#enableAngleControl").addEventListener("change", e => {
+      enableAngleControl = e.target.checked;
+      
+      if (enableAngleControl) {
+        log('✅ 啟用角度控制播放速率');
+        if (playing) {
+          updatePlaybackRateFromAngle(currentTiltAngle);
+        }
+      } else {
+        log('❌ 停用角度控制播放速率，使用基礎倍率');
+        $("#angleSpeedIndicator").style.display = "none";
+        if (source && playing) {
+          source.playbackRate.setTargetAtTime(baseRate, ctx.currentTime, 0.1);
+        }
+      }
+    });
+    
+    // 初始化
+    const initApp = async () => {
+      log('🚀 AMB82 心跳角度監測系統已啟動');
+      log('💡 功能說明：');
+      log('   • 點擊「開始傳輸」會自動開始記錄資料');
+      log('   • 點擊「停止傳輸」會停止記錄並可下載 JSON');
+      log('   • JSON 檔案包含開始/結束時間及原始封包資料');
+      log('   • 踏板角度會自動控制音樂播放速度');
+      log('   • 角度 -20° ~ +20° 對應速率 0.5x ~ 2.0x');
+      updateStatus('📱 請先連接設備');
+    };
+    
+    // 啟動應用
+    initApp();
+    
+  </script>
+</body>
+</html>
