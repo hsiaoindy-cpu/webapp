@@ -317,7 +317,7 @@
       <p style="font-size:0.9em;opacity:0.8;">
         BLE 傳入踏板角度會自動改變播放速率（角度越大 → 播放越快）
         <br>
-        角度範圍：-20° 到 +20°，對應速率：0.5x 到 2.0x
+        角度範圍：-5° 到 +45°，對應速率：0.5x 到 1.5x
       </p>
     </section>
 
@@ -354,14 +354,15 @@
     const setAudioStatus = t => $("#audioStatus").textContent = t;
     
     // 將踏板角度轉換為播放速率
-    // 角度範圍：-20° 到 +20°
-    // 速率範圍：0.5x 到 2.0x
+    // 角度範圍：-5° 到 +45°
+    // 速率範圍：0.5x 到 1.5x
     const angleToPlaybackRate = (angle) => {
       // 限制角度範圍
-      const clampedAngle = Math.max(-20, Math.min(20, angle));
+      const clampedAngle = Math.max(-5, Math.min(45, angle));
       
-      // 線性映射：-20° -> 0.5x, 0° -> 1.0x, +20° -> 2.0x
-      const rate = 1.0 + (clampedAngle / 20) * 1.0;
+      // 線性映射：-5° -> 0.5x, 20° -> 1.0x, 45° -> 2.0x
+      // 計算公式：rate = 0.5 + (angle + 5) / 50 * 1.5
+      const rate = 0.5 + ((clampedAngle + 5) / 50) * 1;
       
       return Math.max(0.5, Math.min(2.0, rate));
     };
@@ -745,7 +746,8 @@
       log('   • 點擊「停止傳輸」會停止記錄並可下載 JSON');
       log('   • JSON 檔案包含開始/結束時間及原始封包資料');
       log('   • 踏板角度會自動控制音樂播放速度');
-      log('   • 角度 -20° ~ +20° 對應速率 0.5x ~ 2.0x');
+      log('   • 角度 -5° ~ +45° 對應速率 0.5x ~ 1.5x');
+      log('   • 參考點：-5°=0.5x, 20°=1.0x, 45°=1.5x');
       updateStatus('📱 請先連接設備');
     };
     
