@@ -63,12 +63,12 @@
       transform: none;
     }
     
-    #handshakeBtn, #stopBtn, #speedBtn {
+    #handshakeBtn, #stopBtn, #speedBtn, #slowBtn {
       background: #2196F3;
       color: white;
     }
     
-    #handshakeBtn:hover, #stopBtn:hover, #speedBtn:hover {
+    #handshakeBtn:hover, #stopBtn:hover, #speedBtn:hover, #slowBtn:hover {
       background: #1976D2;
     }
     
@@ -145,7 +145,7 @@
       overflow-y: auto;
       font-size: 14px;
       margin-top: 20px;
-      display: none;
+      /* display: none; */
     }
     
     .status {
@@ -239,7 +239,8 @@
     <div class="controls">
       <button id="handshakeBtn" disabled>🤝 開始傳輸</button>
       <button id="stopBtn" disabled>⏹️ 停止傳輸</button>
-      <button id="speedBtn" disabled>🏃 切換速度</button>
+      <button id="speedBtn" disabled>🏃 增加速度</button>
+      <button id="slowBtn" disabled>🏃 降低速度</button>
     </div>
     
     <div id="recordingStatus" style="display: none;" class="recording-status">
@@ -286,7 +287,7 @@
       <div id="angleSpeedIndicator" class="angle-speed-indicator" style="display: none;">
         🎵 自動播放速率：<span id="autoSpeedValue">1.00</span>x
         <br>
-        <small>由踏板角度 <span id="angleForSpeed">0.0</span>° 控制</small>
+        <small>步頻：<span id="angleForSpeed">-- </span> SPM | 狀態：<span id="motionState">等待中</span></small>
       </div>
       
       <div class="row">
@@ -311,13 +312,17 @@
       </div>
 
       <div class="row">
-        <label><input id="enableAngleControl" type="checkbox" checked> 啟用角度控制速度</label>
+        <label><input id="enableAngleControl" type="checkbox" checked> 啟用步頻控制速度</label>
       </div>
 
       <p style="font-size:0.9em;opacity:0.8;">
-        BLE 傳入踏板角度會自動改變播放速率（角度越大 → 播放越快）
+        BLE 傳入踏板角度會自動計算步頻，並改變播放速率
         <br>
-        角度範圍：-5° 到 +45°，對應速率：0.5x 到 1.5x
+        步頻計算：偵測角度上升/下降方向變化來識別峰值
+        <br>
+        <small>30 SPM (4秒2步) = 1.0x | 60 SPM (2秒2步) = 2.0x | 15 SPM (8秒2步) = 0.5x</small>
+        <br>
+        <small style="color:#ffeb3b;">⚠️ 角度資料每50ms更新，但變化很慢，需持續踏步1-2秒後才能準確計算步頻</small>
       </p>
     </section>
 
@@ -326,7 +331,7 @@
   </div>
 
   <script>
-    // 全域變數
+    // ==================== 全域變數 ====================
     let device = null;
     let server = null;
     let service = null;
@@ -350,40 +355,239 @@
     let enableAngleControl = true;
     let currentTiltAngle = 0;
     
+    // 步頻計算相關變數
+    let angleHistory = []; // 保存所有角度歷史 {angle, timestamp}
+    let stepTimestamps = []; // 記錄步伐時間點
+    let lastPeakTime = 0;
+    let lastPeakType = null; // 'min' 或 'max'
+    
+    const LOW_ANGLE = -5;      // 理論最低點
+    const HIGH_ANGLE = 45;     // 理論最高點
+    const MID_ANGLE = 20;      // 中間角度
+    
+    const ANGLE_HISTORY_DURATION = 10000; // 保留 10 秒的角度歷史
+    const MIN_PEAK_INTERVAL = 300; // 兩個峰值之間的最小間隔（毫秒）
+    const PEAK_DETECTION_WINDOW = 1000; // 峰值偵測窗口（1秒）
+    const STEP_HISTORY_MAX = 10; // 保留最近幾步的時間記錄
+    const CADENCE_CALC_WINDOW = 4; // 用最近幾步來計算步頻
+    const SPEED_UPDATE_INTERVAL = 3000; // 每3秒更新一次播放速率
+    
+    let currentState = 'unknown'; // 'rising', 'falling', 'unknown'
+    let lastStateChangeTime = 0;
+    let lastSpeedUpdateTime = 0; // 上次更新播放速率的時間
+    
     const $ = sel => document.querySelector(sel);
     const setAudioStatus = t => $("#audioStatus").textContent = t;
     
-    // 將踏板角度轉換為播放速率
-    // 角度範圍：-5° 到 +45°
-    // 速率範圍：0.5x 到 1.5x
-    const angleToPlaybackRate = (angle) => {
-      // 限制角度範圍
-      const clampedAngle = Math.max(-5, Math.min(45, angle));
+    // ==================== 步頻計算函數 ====================
+    
+    // 添加角度到歷史記錄
+    const addAngleToHistory = (angle, timestamp) => {
+      angleHistory.push({ angle, timestamp });
       
-      // 線性映射：-5° -> 0.5x, 20° -> 1.0x, 45° -> 2.0x
-      // 計算公式：rate = 0.5 + (angle + 5) / 50 * 1.5
-      const rate = 0.5 + ((clampedAngle + 5) / 50) * 1;
+      // 清理超過保留時間的資料
+      const cutoffTime = timestamp - ANGLE_HISTORY_DURATION;
+      angleHistory = angleHistory.filter(item => item.timestamp > cutoffTime);
+    };
+    
+    // 在指定時間窗口內找到最大/最小角度
+    const findPeakInWindow = (centerTime, windowMs, type = 'max') => {
+      const startTime = centerTime - windowMs / 2;
+      const endTime = centerTime + windowMs / 2;
+      
+      const windowData = angleHistory.filter(
+        item => item.timestamp >= startTime && item.timestamp <= endTime
+      );
+      
+      if (windowData.length === 0) return null;
+      
+      if (type === 'max') {
+        return windowData.reduce((max, item) => 
+          item.angle > max.angle ? item : max
+        );
+      } else {
+        return windowData.reduce((min, item) => 
+          item.angle < min.angle ? item : min
+        );
+      }
+    };
+    
+    // 判斷當前運動方向
+    const detectMotionDirection = (angle, timestamp) => {
+      if (angleHistory.length < 10) return 'unknown'; // 需要足夠的歷史資料
+      
+      // 取最近 1 秒的資料
+      const recentData = angleHistory.filter(
+        item => timestamp - item.timestamp <= 1000
+      );
+      
+      if (recentData.length < 5) return currentState;
+      
+      // 計算角度變化趨勢（線性回歸的簡化版本）
+      const firstHalf = recentData.slice(0, Math.floor(recentData.length / 2));
+      const secondHalf = recentData.slice(Math.floor(recentData.length / 2));
+      
+      const avgFirst = firstHalf.reduce((sum, item) => sum + item.angle, 0) / firstHalf.length;
+      const avgSecond = secondHalf.reduce((sum, item) => sum + item.angle, 0) / secondHalf.length;
+      
+      const diff = avgSecond - avgFirst;
+      
+      if (Math.abs(diff) < 1) return currentState; // 變化太小，保持當前狀態
+      
+      return diff > 0 ? 'rising' : 'falling';
+    };
+    
+    // 偵測峰值（最高點或最低點）
+    const detectPeak = (angle, timestamp) => {
+      // 添加到歷史記錄
+      addAngleToHistory(angle, timestamp);
+      
+      // 需要足夠的歷史資料才能開始偵測
+      if (angleHistory.length < 20) {
+        $("#motionState").textContent = "收集資料中...";
+        return false; // 至少 1 秒的資料
+      }
+      
+      // 防止過於頻繁的峰值偵測
+      if (timestamp - lastPeakTime < MIN_PEAK_INTERVAL) {
+        return false;
+      }
+      
+      // 判斷當前運動方向
+      const newDirection = detectMotionDirection(angle, timestamp);
+      const directionChanged = (newDirection !== currentState && 
+                               newDirection !== 'unknown' && 
+                               currentState !== 'unknown');
+      
+      if (directionChanged) {
+        log(`📊 方向變化: ${currentState} → ${newDirection}, 角度: ${angle.toFixed(1)}°`);
+      }
+      
+      const prevState = currentState;
+      currentState = newDirection;
+      
+      // 更新狀態顯示
+      if (currentState === 'rising') {
+        $("#motionState").textContent = "上升中 ↗";
+      } else if (currentState === 'falling') {
+        $("#motionState").textContent = "下降中 ↘";
+      }
+      
+      // 方向轉變時才可能出現峰值
+      if (!directionChanged) return false;
+      
+      let peakType = null;
+      
+      // 從上升轉為下降 = 可能到達最高點
+      if (prevState === 'rising' && newDirection === 'falling') {
+        // 在轉折點附近找最大值
+        const peak = findPeakInWindow(timestamp, PEAK_DETECTION_WINDOW, 'max');
+        
+        if (peak && peak.angle > MID_ANGLE && lastPeakType !== 'max') {
+          peakType = 'max';
+          log(`👣 偵測到最高點 - 角度: ${peak.angle.toFixed(1)}°, 時間: ${new Date(peak.timestamp).toLocaleTimeString()}.${peak.timestamp % 1000}`);
+        }
+      }
+      
+      // 從下降轉為上升 = 可能到達最低點
+      if (prevState === 'falling' && newDirection === 'rising') {
+        // 在轉折點附近找最小值
+        const peak = findPeakInWindow(timestamp, PEAK_DETECTION_WINDOW, 'min');
+        
+        if (peak && peak.angle < MID_ANGLE && lastPeakType !== 'min') {
+          peakType = 'min';
+          log(`👣 偵測到最低點 - 角度: ${peak.angle.toFixed(1)}°, 時間: ${new Date(peak.timestamp).toLocaleTimeString()}.${peak.timestamp % 1000}`);
+        }
+      }
+      
+      if (peakType) {
+        lastPeakType = peakType;
+        lastPeakTime = timestamp;
+        lastStateChangeTime = timestamp;
+        stepTimestamps.push(timestamp);
+        
+        // 只保留最近的步數記錄
+        if (stepTimestamps.length > STEP_HISTORY_MAX) {
+          stepTimestamps.shift();
+        }
+        
+        return true;
+      }
+      
+      return false;
+    };
+    
+    // 計算步頻（steps per minute, SPM）
+    const calculateCadence = () => {
+      if (stepTimestamps.length < 2) return null;
+      
+      // 使用最近幾步計算平均步頻
+      const recentSteps = Math.min(CADENCE_CALC_WINDOW, stepTimestamps.length);
+      const startTime = stepTimestamps[stepTimestamps.length - recentSteps];
+      const endTime = stepTimestamps[stepTimestamps.length - 1];
+      const timeSpan = (endTime - startTime) / 1000; // 轉換為秒
+      
+      if (timeSpan === 0) return null;
+      
+      // 計算步頻（步/分鐘）
+      const stepsInSpan = recentSteps - 1;
+      const spm = (stepsInSpan / timeSpan) * 60;
+      
+      return spm;
+    };
+    
+    // 將步頻轉換為播放速率
+    const cadenceToPlaybackRate = (spm) => {
+      if (!spm || spm <= 0) return 1.0;
+      
+      // 線性映射：15 SPM -> 0.5x, 30 SPM -> 1.0x, 60 SPM -> 2.0x
+      // const rate = (spm / 30);
+      const rate = (spm / 10);
       
       return Math.max(0.5, Math.min(2.0, rate));
     };
     
     // 更新音樂播放速率
     const updatePlaybackRateFromAngle = (angle) => {
-      if (!enableAngleControl || !source || !playing) return;
+      if (!enableAngleControl || !source || !playing) {
+        return;
+      }
       
       currentTiltAngle = angle;
-      const newRate = angleToPlaybackRate(angle);
       
-      // 平滑過渡到新速率
-      source.playbackRate.setTargetAtTime(newRate, ctx.currentTime, 0.1);
+      // 偵測步伐
+      const timestamp = Date.now();
+      const stepDetected = detectPeak(angle, timestamp);
       
-      // 更新顯示
-      $("#autoSpeedValue").textContent = newRate.toFixed(2);
-      $("#angleForSpeed").textContent = angle.toFixed(1);
-      $("#angleSpeedIndicator").style.display = "block";
+      // 計算步頻
+      const cadence = calculateCadence();
       
-      log(`🎵 角度 ${angle.toFixed(1)}° → 播放速率 ${newRate.toFixed(2)}x`);
+      if (cadence) {
+        const newRate = cadenceToPlaybackRate(cadence);
+        
+        // 平滑過渡到新速率
+        source.playbackRate.setTargetAtTime(newRate, ctx.currentTime, 0.2);
+        
+        // 更新顯示
+        $("#autoSpeedValue").textContent = newRate.toFixed(2);
+        $("#angleForSpeed").textContent = `${cadence.toFixed(1)}`;
+        $("#angleSpeedIndicator").style.display = "block";
+        
+        if (stepDetected) {
+          log(`🎵 步頻 ${cadence.toFixed(1)} SPM → 播放速率 ${newRate.toFixed(2)}x`);
+        }
+      } else if (stepTimestamps.length === 1) {
+        // 只偵測到第一步，顯示提示
+        $("#angleSpeedIndicator").style.display = "block";
+        $("#autoSpeedValue").textContent = baseRate.toFixed(2);
+        $("#angleForSpeed").textContent = "等待中";
+        if (stepDetected) {
+          log('👣 已偵測到第一步，請繼續踏步以計算步頻');
+        }
+      }
     };
+    
+    // ==================== 通用工具函數 ====================
     
     // 日誌函數
     const log = (...args) => {
@@ -405,9 +609,12 @@
       document.getElementById('handshakeBtn').disabled = !connected;
       document.getElementById('stopBtn').disabled = !connected || !isTransmitting;
       document.getElementById('speedBtn').disabled = !connected;
+      document.getElementById('slowBtn').disabled = !connected;
       document.getElementById('connectBtn').disabled = connected;
       document.getElementById('downloadBtn').disabled = !currentSession || isRecording;
     };
+    
+    // ==================== 資料記錄函數 ====================
     
     // 開始新的記錄會話
     const startRecordingSession = () => {
@@ -481,11 +688,12 @@
       log(`📁 檔案包含 ${currentSession.rawData.length} 筆記錄`);
     };
     
+    // ==================== BLE 通訊函數 ====================
+    
     // 解析資料封包
     const parseDataPacket = (data) => {
       try {
         const text = new TextDecoder().decode(data);
-        log('收到原始資料:', text);
         
         const match = text.match(/<(\d)(\d{3})([+-]\d{3})>/);
         if (match) {
@@ -504,7 +712,6 @@
           // 根據角度更新音樂播放速率
           updatePlaybackRateFromAngle(tiltAngle);
           
-          log(`✅ 解析成功 - 序號:${sequence}, 心率:${heartRate}, 踏板角度:${tiltAngle}°`);
           return true;
         } else {
           log('⚠️ 非標準封包格式:', text);
@@ -534,6 +741,8 @@
         return false;
       }
     };
+    
+    // ==================== 事件監聽器 ====================
     
     // 連接設備
     document.getElementById('connectBtn').addEventListener('click', async () => {
@@ -621,23 +830,31 @@
       }
     });
     
-    // 切換速度模式
+    // 增加速度
     document.getElementById('speedBtn').addEventListener('click', async () => {
-      const nextMode = currentSpeedMode === 'SLOW' ? 'FAST' : 'SLOW';
+      const nextMode = 'FAST';
       if (await sendCommand(nextMode)) {
         currentSpeedMode = nextMode;
-        document.getElementById('speedBtn').textContent = 
-          `🏃 模式: ${currentSpeedMode}`;
         log(`🚀 切換到 ${currentSpeedMode} 模式`);
       }
     });
+
+    // 降低速度
+    document.getElementById('slowBtn').addEventListener('click', async () => {
+      const nextMode = 'SLOW';
+      if (await sendCommand(nextMode)) {
+        currentSpeedMode = nextMode;
+        log(`🚀 切換到 ${currentSpeedMode} 模式`);
+      }
+    });    
     
     // 下載按鈕事件
     document.getElementById('downloadBtn').addEventListener('click', () => {
       downloadJSON();
     });
     
-    /* === WebAudio 音樂播放 === */
+    // ==================== WebAudio 音樂播放 ====================
+    
     async function ensureCtx() {
       if (!ctx) {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -662,9 +879,8 @@
       source.buffer = buffer;
       source.loop = loop;
       
-      // 使用基礎速率或當前角度速率
-      const initialRate = enableAngleControl ? angleToPlaybackRate(currentTiltAngle) : baseRate;
-      source.playbackRate.value = initialRate;
+      // 使用基礎速率作為初始速率
+      source.playbackRate.value = baseRate;
       
       source.connect(gainNode);
       source.start();
@@ -675,7 +891,8 @@
       
       if (enableAngleControl) {
         $("#angleSpeedIndicator").style.display = "block";
-        log('🎵 音樂播放已啟動，將根據踏板角度自動調整速率');
+        log('🎵 音樂播放已啟動，將根據步頻自動調整速率');
+        log('💡 請開始踏步，系統會在偵測到步伐後調整速率');
       }
     }
 
@@ -725,12 +942,18 @@
       enableAngleControl = e.target.checked;
       
       if (enableAngleControl) {
-        log('✅ 啟用角度控制播放速率');
+        log('✅ 啟用步頻控制播放速率');
         if (playing) {
-          updatePlaybackRateFromAngle(currentTiltAngle);
+          // 重置步頻計算
+          stepTimestamps = [];
+          lastPeakType = null;
+          lastPeakTime = 0;
+          angleHistory = [];
+          currentState = 'unknown';
+          lastStateChangeTime = 0;
         }
       } else {
-        log('❌ 停用角度控制播放速率，使用基礎倍率');
+        log('❌ 停用步頻控制播放速率，使用基礎倍率');
         $("#angleSpeedIndicator").style.display = "none";
         if (source && playing) {
           source.playbackRate.setTargetAtTime(baseRate, ctx.currentTime, 0.1);
@@ -738,16 +961,18 @@
       }
     });
     
-    // 初始化
+    // ==================== 初始化 ====================
+    
     const initApp = async () => {
-      log('🚀 AMB82 心跳角度監測系統已啟動');
+      log('🚀 AMB82 心跳角度監測系統已啟動（步頻偵測優化版）');
       log('💡 功能說明：');
       log('   • 點擊「開始傳輸」會自動開始記錄資料');
       log('   • 點擊「停止傳輸」會停止記錄並可下載 JSON');
       log('   • JSON 檔案包含開始/結束時間及原始封包資料');
-      log('   • 踏板角度會自動控制音樂播放速度');
-      log('   • 角度 -5° ~ +45° 對應速率 0.5x ~ 1.5x');
-      log('   • 參考點：-5°=0.5x, 20°=1.0x, 45°=1.5x');
+      log('   • 系統會分析角度變化趨勢偵測峰值（最高點/最低點）');
+      log('   • 步頻 15~60 SPM 對應速率 0.5x ~ 2.0x');
+      log('   • 基準：30 SPM (4秒2步) = 1.0x');
+      log('   • ⚠️ 角度更新頻繁但變化慢，需持續踏步1-2秒才能計算步頻');
       updateStatus('📱 請先連接設備');
     };
     
